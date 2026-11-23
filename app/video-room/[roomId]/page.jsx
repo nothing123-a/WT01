@@ -36,7 +36,8 @@ export default function VideoRoom() {
   };
 
   useEffect(() => {
-    if (!session?.user?.id) return;
+    const userId = session?.user?.id || session?.user?.email || (session?.user ? "demo-patient-123" : null);
+    if (!userId) return;
 
     let mounted = true;
     let pc = null;

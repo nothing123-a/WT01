@@ -18,7 +18,7 @@ export default function WaitingPage() {
       setWaitTime(prev => prev + 1);
     }, 1000);
 
-    const patientId = session?.user?.id || (session?.user ? "demo-patient-123" : null);
+    const patientId = session?.user?.id || session?.user?.email || "demo-patient-123";
 
     // Connect to Socket.IO for real-time notifications
     if (patientId) {
