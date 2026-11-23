@@ -1,12 +1,13 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { MessageSquare, Video, FileText, Clock, User, CheckCircle } from "lucide-react";
+import { MessageSquare, Video, FileText, Clock, User, CheckCircle, RefreshCw } from "lucide-react";
 import { io as socketIO } from "socket.io-client";
 
 export default function RoutineDoctorPanel({ doctorId, doctorName, inline = false }) {
   const [requests, setRequests] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const socketRef = useRef(null);
   const [socketConnected, setSocketConnected] = useState(false);
 
@@ -16,8 +17,6 @@ export default function RoutineDoctorPanel({ doctorId, doctorName, inline = fals
 
     // Connect to Socket.IO for real-time updates
     try {
-      // Use io() without explicit URL — connects to the server that served the page
-      // Use polling first for reliable initial connection, then upgrade to websocket
       const socket = socketIO({
         transports: ['polling', 'websocket'],
         upgrade: true,
@@ -33,7 +32,6 @@ export default function RoutineDoctorPanel({ doctorId, doctorName, inline = fals
       socket.on("connect", () => {
         console.log("🩺 Doctor panel connected to socket:", socket.id);
         setSocketConnected(true);
-        // Register doctor AFTER connection is established
         if (doctorId) {
           socket.emit("register-doctor", { doctorId });
           console.log("🩺 Doctor panel registered doctor:", doctorId);
@@ -42,10 +40,8 @@ export default function RoutineDoctorPanel({ doctorId, doctorName, inline = fals
 
       socket.on("reconnect", (attemptNumber) => {
         console.log("🩺 Doctor panel reconnected after", attemptNumber, "attempts");
-        // Re-register doctor on reconnect
         if (doctorId) {
           socket.emit("register-doctor", { doctorId });
-          console.log("🩺 Doctor panel re-registered doctor:", doctorId);
         }
       });
 
@@ -53,16 +49,15 @@ export default function RoutineDoctorPanel({ doctorId, doctorName, inline = fals
       socket.on("new-routine-request", (newRequest) => {
         console.log("📥 New routine request received via socket:", newRequest);
         setRequests(prev => {
-          // Avoid duplicates
-          if (prev.find(r => r._id === newRequest._id)) return prev;
-          return [...prev, newRequest];
+          if (prev.find(r => r._id?.toString() === newRequest._id?.toString())) return prev;
+          return [newRequest, ...prev];
         });
       });
 
-      // Listen for requests being removed (accepted by another doctor)
+      // Listen for requests being removed
       socket.on("routine-request-removed", ({ requestId }) => {
         console.log("🗑️ Routine request removed:", requestId);
-        setRequests(prev => prev.filter(r => r._id !== requestId));
+        setRequests(prev => prev.filter(r => r._id?.toString() !== requestId?.toString()));
       });
 
       socket.on("connect_error", (err) => {
@@ -78,8 +73,8 @@ export default function RoutineDoctorPanel({ doctorId, doctorName, inline = fals
       console.error("Socket.IO init failed for doctor panel:", err);
     }
 
-    // Fallback polling (less frequent since we have sockets)
-    const interval = setInterval(fetchRequests, 10000);
+    // Polling interval (every 4 seconds for instant responsiveness)
+    const interval = setInterval(fetchRequests, 4000);
 
     return () => {
       clearInterval(interval);
@@ -92,8 +87,15 @@ export default function RoutineDoctorPanel({ doctorId, doctorName, inline = fals
 
   const fetchRequests = async () => {
     try {
-      const url = doctorId ? `/api/routine-doctor/requests?doctorId=${doctorId}` : "/api/routine-doctor/requests";
-      const response = await fetch(url);
+      setIsRefreshing(true);
+      const url = `/api/routine-doctor/requests?t=${Date.now()}`;
+      const response = await fetch(url, {
+        cache: "no-store",
+        headers: {
+          "Cache-Control": "no-cache",
+          "Pragma": "no-cache"
+        }
+      });
       const data = await response.json();
       
       if (response.ok) {
@@ -103,6 +105,7 @@ export default function RoutineDoctorPanel({ doctorId, doctorName, inline = fals
       console.error("Error fetching routine requests:", error);
     } finally {
       setLoading(false);
+      setIsRefreshing(false);
     }
   };
 
@@ -120,9 +123,7 @@ export default function RoutineDoctorPanel({ doctorId, doctorName, inline = fals
 
       if (response.ok) {
         const data = await response.json();
-        // Remove from local state immediately
-        setRequests(prev => prev.filter(r => r._id !== requestId));
-        // Redirect based on connection type
+        setRequests(prev => prev.filter(r => r._id?.toString() !== requestId?.toString()));
         const roomType = data.connectionType === 'chat' ? 'chat' : 'video';
         window.location.href = `/${roomType}-room/${data.roomId}`;
       }
@@ -140,7 +141,7 @@ export default function RoutineDoctorPanel({ doctorId, doctorName, inline = fals
       });
 
       if (response.ok) {
-        setRequests(prev => prev.filter(r => r._id !== requestId));
+        setRequests(prev => prev.filter(r => r._id?.toString() !== requestId?.toString()));
         fetchRequests();
       }
     } catch (error) {
@@ -157,6 +158,7 @@ export default function RoutineDoctorPanel({ doctorId, doctorName, inline = fals
   };
 
   const formatTimeAgo = (timestamp) => {
+    if (!timestamp) return "Just now";
     const now = new Date();
     const time = new Date(timestamp);
     const diffInMinutes = Math.floor((now - time) / (1000 * 60));
@@ -180,32 +182,47 @@ export default function RoutineDoctorPanel({ doctorId, doctorName, inline = fals
 
   return (
     <div className={inline ? "" : "bg-white rounded-2xl shadow-xl border border-orange-100"}>
-      {!inline && (
-        <div className="p-6 border-b border-orange-100">
-          <h3 className="text-xl font-semibold text-orange-800 flex items-center gap-3">
-            <div className="p-2 bg-gradient-to-r from-orange-100 to-red-100 rounded-full">
-              <span className="text-orange-500 text-xl">🩺</span>
-            </div>
-            Routine Doctor Requests
+      <div className="p-4 sm:p-6 border-b border-orange-100 flex items-center justify-between">
+        <div>
+          <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+            <span className="text-orange-500 text-lg">🩺</span>
+            Incoming Requests
+            <span className="ml-1.5 px-2 py-0.5 text-xs font-bold bg-orange-100 text-orange-700 rounded-full">
+              {pendingRequests.length}
+            </span>
           </h3>
-          <p className="text-sm text-orange-600 mt-2">Patient consultation requests</p>
+          <p className="text-xs text-gray-500 mt-0.5">Real-time consultation queue</p>
         </div>
-      )}
+        <button
+          onClick={fetchRequests}
+          disabled={isRefreshing}
+          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-orange-700 bg-orange-50 hover:bg-orange-100 rounded-lg transition-all border border-orange-200 shadow-sm"
+          title="Refresh queue"
+        >
+          <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin' : ''}`} />
+          <span>Refresh</span>
+        </button>
+      </div>
 
-      <div className="">
+      <div className="p-4 sm:p-6">
         {pendingRequests.length === 0 ? (
           <div className="text-center py-8">
-            <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
-              <MessageSquare className="w-8 h-8 text-gray-400" />
+            <div className="w-16 h-16 bg-orange-50 rounded-full flex items-center justify-center mx-auto mb-3">
+              <MessageSquare className="w-8 h-8 text-orange-300" />
             </div>
-            <p className="text-gray-500 font-medium">No routine requests at the moment</p>
-            <p className="text-gray-400 text-sm mt-1">New consultation requests will appear here</p>
+            <p className="text-gray-700 font-medium">No routine requests right now</p>
+            <p className="text-gray-400 text-xs mt-1">When a patient submits a request, it will appear here instantly</p>
+            <button
+              onClick={fetchRequests}
+              className="mt-3 inline-flex items-center gap-1 text-xs text-orange-600 hover:text-orange-700 font-semibold underline"
+            >
+              Check again
+            </button>
           </div>
         ) : (
           <div className="space-y-4">
             {pendingRequests.map((request) => {
               const ConnectionIcon = getConnectionIcon(request.connectionType);
-              const color = getConnectionColor(request.connectionType);
               
               return (
                 <div
@@ -239,7 +256,7 @@ export default function RoutineDoctorPanel({ doctorId, doctorName, inline = fals
                           </div>
                           <div className="flex items-center gap-1 text-orange-600 text-xs sm:text-sm">
                             <Clock className="w-3 h-3 sm:w-4 sm:h-4" />
-                            <span>{formatTimeAgo(request.timestamp)}</span>
+                            <span>{formatTimeAgo(request.timestamp || request.createdAt)}</span>
                           </div>
                         </div>
                       </div>
@@ -248,37 +265,25 @@ export default function RoutineDoctorPanel({ doctorId, doctorName, inline = fals
                         <div className="bg-white/70 rounded-lg p-2 sm:p-3 mb-3 border border-orange-100">
                           <div className="flex items-start gap-2">
                             <FileText className="w-3 h-3 sm:w-4 sm:h-4 text-gray-500 mt-0.5 flex-shrink-0" />
-                            <div className="min-w-0">
-                              <p className="text-xs sm:text-sm font-medium text-gray-700 mb-1">Patient Note:</p>
-                              <p className="text-xs sm:text-sm text-gray-600 break-words">{request.note}</p>
-                            </div>
+                            <p className="text-xs sm:text-sm text-gray-700 line-clamp-2">{request.note}</p>
                           </div>
                         </div>
                       )}
 
-                      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                        <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-4 text-xs sm:text-sm text-gray-600">
-                          <span>Request Type: Routine Consultation</span>
-                          <span className="hidden sm:inline">•</span>
-                          <span>Status: Waiting for doctor</span>
-                        </div>
-                        
-                        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-3">
-                          <button
-                            onClick={() => handlePassRequest(request._id)}
-                            className="bg-gray-500 text-white px-3 sm:px-4 py-2 rounded-lg text-sm font-semibold hover:bg-gray-600 transition-all duration-200 flex items-center justify-center gap-2"
-                          >
-                            Pass
-                          </button>
-                          <button
-                            onClick={() => handleAcceptRequest(request._id)}
-                            className="bg-gradient-to-r from-orange-500 to-red-500 text-white px-4 sm:px-6 py-2 rounded-lg text-sm font-semibold hover:from-orange-600 hover:to-red-600 transition-all duration-200 flex items-center justify-center gap-2 shadow-lg hover:shadow-xl"
-                          >
-                            <CheckCircle className="w-3 h-3 sm:w-4 sm:h-4" />
-                            <span className="hidden sm:inline">Accept & Connect</span>
-                            <span className="sm:hidden">Accept</span>
-                          </button>
-                        </div>
+                      <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-3">
+                        <button
+                          onClick={() => handleAcceptRequest(request._id)}
+                          className="flex-1 bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 text-white font-medium py-2 px-3 sm:px-4 rounded-lg text-xs sm:text-sm flex items-center justify-center gap-1.5 sm:gap-2 shadow-sm transition-all duration-200"
+                        >
+                          <CheckCircle className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                          <span>Accept & Join</span>
+                        </button>
+                        <button
+                          onClick={() => handlePassRequest(request._id)}
+                          className="px-3 sm:px-4 py-2 border border-gray-300 hover:bg-gray-50 text-gray-700 font-medium rounded-lg text-xs sm:text-sm transition-all duration-200"
+                        >
+                          Pass
+                        </button>
                       </div>
                     </div>
                   </div>
