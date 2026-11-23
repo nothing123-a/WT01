@@ -8,6 +8,7 @@ export default function RoutineDoctorPanel({ doctorId, doctorName, inline = fals
   const [requests, setRequests] = useState([]);
   const [loading, setLoading] = useState(true);
   const socketRef = useRef(null);
+  const [socketConnected, setSocketConnected] = useState(false);
 
   useEffect(() => {
     // Initial fetch
@@ -15,17 +16,36 @@ export default function RoutineDoctorPanel({ doctorId, doctorName, inline = fals
 
     // Connect to Socket.IO for real-time updates
     try {
-      const socket = socketIO(window.location.origin, {
-        transports: ['websocket', 'polling'],
-        timeout: 5000,
+      // Use io() without explicit URL — connects to the server that served the page
+      // Use polling first for reliable initial connection, then upgrade to websocket
+      const socket = socketIO({
+        transports: ['polling', 'websocket'],
+        upgrade: true,
+        timeout: 20000,
+        reconnection: true,
+        reconnectionAttempts: Infinity,
+        reconnectionDelay: 1000,
+        reconnectionDelayMax: 5000,
       });
 
       socketRef.current = socket;
 
       socket.on("connect", () => {
         console.log("🩺 Doctor panel connected to socket:", socket.id);
+        setSocketConnected(true);
+        // Register doctor AFTER connection is established
         if (doctorId) {
           socket.emit("register-doctor", { doctorId });
+          console.log("🩺 Doctor panel registered doctor:", doctorId);
+        }
+      });
+
+      socket.on("reconnect", (attemptNumber) => {
+        console.log("🩺 Doctor panel reconnected after", attemptNumber, "attempts");
+        // Re-register doctor on reconnect
+        if (doctorId) {
+          socket.emit("register-doctor", { doctorId });
+          console.log("🩺 Doctor panel re-registered doctor:", doctorId);
         }
       });
 
@@ -46,10 +66,16 @@ export default function RoutineDoctorPanel({ doctorId, doctorName, inline = fals
       });
 
       socket.on("connect_error", (err) => {
-        console.log("Doctor panel socket error, using polling:", err.message);
+        console.warn("🩺 Doctor panel socket connection error:", err.message);
+        setSocketConnected(false);
+      });
+
+      socket.on("disconnect", (reason) => {
+        console.log("🩺 Doctor panel socket disconnected:", reason);
+        setSocketConnected(false);
       });
     } catch (err) {
-      console.log("Socket.IO init failed for doctor panel:", err);
+      console.error("Socket.IO init failed for doctor panel:", err);
     }
 
     // Fallback polling (less frequent since we have sockets)
@@ -59,6 +85,7 @@ export default function RoutineDoctorPanel({ doctorId, doctorName, inline = fals
       clearInterval(interval);
       if (socketRef.current) {
         socketRef.current.disconnect();
+        socketRef.current = null;
       }
     };
   }, [doctorId]);

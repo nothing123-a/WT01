@@ -23,9 +23,16 @@ export default function WaitingPage() {
     // Connect to Socket.IO for real-time notifications
     if (patientId) {
       try {
-        const socket = socketIO(window.location.origin, {
-          transports: ['websocket', 'polling'],
-          timeout: 5000,
+        // Use io() without explicit URL for reliable same-origin connection
+        // Use polling first for reliable initial connection, then upgrade
+        const socket = socketIO({
+          transports: ['polling', 'websocket'],
+          upgrade: true,
+          timeout: 20000,
+          reconnection: true,
+          reconnectionAttempts: Infinity,
+          reconnectionDelay: 1000,
+          reconnectionDelayMax: 5000,
         });
 
         socketRef.current = socket;
@@ -34,6 +41,16 @@ export default function WaitingPage() {
           console.log("🔌 Patient waiting page connected to socket:", socket.id);
           // Register this patient for targeted notifications
           socket.emit("register-patient", { userId: patientId });
+          // Also register as user for compatibility with escalation events
+          socket.emit("register-user", { userId: patientId });
+          console.log("🏥 Patient registered:", patientId);
+        });
+
+        // Re-register on reconnect
+        socket.on("reconnect", () => {
+          console.log("🔌 Patient waiting page reconnected");
+          socket.emit("register-patient", { userId: patientId });
+          socket.emit("register-user", { userId: patientId });
         });
 
         // Listen for real-time acceptance
@@ -47,10 +64,10 @@ export default function WaitingPage() {
         });
 
         socket.on("connect_error", (err) => {
-          console.log("Socket connection error, falling back to polling:", err.message);
+          console.warn("Socket connection error, falling back to polling:", err.message);
         });
       } catch (err) {
-        console.log("Socket.IO init failed, using polling fallback:", err);
+        console.error("Socket.IO init failed, using polling fallback:", err);
       }
     }
 

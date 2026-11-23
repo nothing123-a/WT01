@@ -26,26 +26,45 @@ app.prepare().then(() => {
     cors: {
       origin: "*",
       methods: ["GET", "POST"]
-    }
+    },
+    // Use polling first for reliable connections, then upgrade to websocket
+    transports: ['polling', 'websocket'],
+    pingTimeout: 60000,
+    pingInterval: 25000,
   });
 
   // Make io globally available for API routes
   global._io = io;
 
+  // Track connected sockets for debugging
+  let connectedCount = 0;
+
   io.on("connection", (socket) => {
-    console.log("Socket connected:", socket.id);
+    connectedCount++;
+    console.log(`🔌 Socket connected: ${socket.id} (total: ${connectedCount})`);
 
     socket.on("register-doctor", ({ doctorId }) => {
-      socket.join(`doctor_${doctorId}`);
+      const room = `doctor_${doctorId}`;
+      socket.join(room);
+      console.log(`👨‍⚕️ Doctor ${doctorId} joined room: ${room} (socket: ${socket.id})`);
+      // Log room members for debugging
+      const roomMembers = io.sockets.adapter.rooms.get(room);
+      console.log(`   Room ${room} now has ${roomMembers ? roomMembers.size : 0} member(s)`);
     });
 
     socket.on("register-user", ({ userId }) => {
-      socket.join(`user_${userId}`);
+      const room = `user_${userId}`;
+      socket.join(room);
+      socket.join(userId.toString()); // Also join with just userId for compatibility
+      console.log(`👤 User ${userId} joined room: ${room} (socket: ${socket.id})`);
     });
 
     socket.on("register-patient", ({ userId }) => {
-      socket.join(`patient_${userId}`);
-      console.log(`Patient ${userId} registered for notifications`);
+      const room = `patient_${userId}`;
+      socket.join(room);
+      // Also join user_ room for compatibility with escalation accept events
+      socket.join(`user_${userId}`);
+      console.log(`🏥 Patient ${userId} joined rooms: ${room}, user_${userId} (socket: ${socket.id})`);
     });
 
     socket.on("join-room", (roomId) => {
@@ -74,12 +93,18 @@ app.prepare().then(() => {
       socket.to(roomId).emit("user-disconnected");
     });
 
-    socket.on("disconnect", () => {
-      console.log("Socket disconnected:", socket.id);
+    socket.on("disconnect", (reason) => {
+      connectedCount--;
+      console.log(`🔌 Socket disconnected: ${socket.id} (reason: ${reason}, remaining: ${connectedCount})`);
     });
   });
 
+  // Log global._io availability periodically for debugging
+  console.log(`✅ global._io is set: ${!!global._io}`);
+
   server.listen(port, () => {
     console.log(`> Ready on http://${hostname}:${port}`);
+    console.log(`> Socket.IO server running`);
+    console.log(`> global._io available: ${!!global._io}`);
   });
-});
+});

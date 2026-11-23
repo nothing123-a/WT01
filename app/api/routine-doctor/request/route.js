@@ -30,6 +30,7 @@ export async function POST(request) {
 
     // Notify all connected doctors in real-time via Socket.IO
     if (global._io) {
+      const connectedSockets = global._io.sockets?.sockets?.size || 'unknown';
       global._io.emit("new-routine-request", {
         _id: routineRequest._id,
         userId,
@@ -41,7 +42,9 @@ export async function POST(request) {
         timestamp: routineRequest.timestamp,
         createdAt: routineRequest.createdAt
       });
-      console.log("📡 Emitted new-routine-request to all doctors");
+      console.log(`📡 Emitted new-routine-request to all sockets (connected: ${connectedSockets})`);
+    } else {
+      console.error("⚠️ global._io is NOT available! Socket.IO broadcast failed. Doctors will only see this request via polling.");
     }
 
     return NextResponse.json({

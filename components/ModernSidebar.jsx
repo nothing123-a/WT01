@@ -52,8 +52,8 @@ export default function ModernSidebar() {
       fetchUserProfile();
       checkPrescriptions();
       
-      // Check for new prescriptions every 10 seconds
-      const interval = setInterval(checkPrescriptions, 10000);
+      // Check for new prescriptions every 30 seconds
+      const interval = setInterval(checkPrescriptions, 30000);
       return () => clearInterval(interval);
     }
   }, [session]);
@@ -70,8 +70,9 @@ export default function ModernSidebar() {
   };
 
   const checkPrescriptions = async () => {
+    if (!session?.user?.id) return;
     try {
-      const res = await fetch(`/api/prescription/user?userId=${session?.user?.id}`);
+      const res = await fetch(`/api/prescription/user?userId=${session.user.id}`);
       const data = await res.json();
       const newCount = data.prescriptions?.length || 0;
       

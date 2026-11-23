@@ -42,19 +42,44 @@ export default function DoctorEscalationPanel({ inline = false }) {
       transports: ['polling', 'websocket'],
       upgrade: true,
       rememberUpgrade: false,
-      timeout: 20000
+      timeout: 20000,
+      reconnection: true,
+      reconnectionAttempts: Infinity,
+      reconnectionDelay: 1000,
+      reconnectionDelayMax: 5000,
     });
     setSocket(socketInstance);
 
-    socketInstance.emit("register-doctor", { doctorId: session.user.id });
+    // Register doctor AFTER connection is established
+    socketInstance.on("connect", () => {
+      console.log("🚨 Escalation panel connected to socket:", socketInstance.id);
+      socketInstance.emit("register-doctor", { doctorId: session.user.id });
+      console.log("🚨 Escalation panel registered doctor:", session.user.id);
+    });
+
+    // Re-register doctor on reconnect
+    socketInstance.on("reconnect", (attemptNumber) => {
+      console.log("🚨 Escalation panel reconnected after", attemptNumber, "attempts");
+      socketInstance.emit("register-doctor", { doctorId: session.user.id });
+      console.log("🚨 Escalation panel re-registered doctor:", session.user.id);
+    });
 
     socketInstance.on("escalation-request", (request) => {
+      console.log("🚨 Received escalation request:", request);
       setRequests(prev => [...prev, request]);
     });
 
     socketInstance.on("connection-request", (request) => {
       console.log("📨 Received connection request:", request);
       setConnectionRequests(prev => [...prev, request]);
+    });
+
+    socketInstance.on("connect_error", (err) => {
+      console.warn("🚨 Escalation panel socket error:", err.message);
+    });
+
+    socketInstance.on("disconnect", (reason) => {
+      console.log("🚨 Escalation panel socket disconnected:", reason);
     });
 
     return () => {

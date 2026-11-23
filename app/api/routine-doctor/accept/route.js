@@ -55,17 +55,26 @@ export async function POST(request) {
     // Notify the patient in real-time via Socket.IO
     if (global._io) {
       const patientRoom = `patient_${routineRequest.userId}`;
-      global._io.to(patientRoom).emit("routine-request-accepted", {
+      const userRoom = `user_${routineRequest.userId}`;
+      
+      const acceptedPayload = {
         requestId,
         roomId,
         connectionType: routineRequest.connectionType,
         doctorName: doctorName,
         acceptedAt: routineRequest.acceptedAt
-      });
-      console.log(`📡 Emitted routine-request-accepted to patient ${routineRequest.userId}`);
+      };
+
+      // Emit to both patient_ and user_ rooms for compatibility
+      global._io.to(patientRoom).emit("routine-request-accepted", acceptedPayload);
+      global._io.to(userRoom).emit("routine-request-accepted", acceptedPayload);
+      console.log(`📡 Emitted routine-request-accepted to rooms: ${patientRoom}, ${userRoom}`);
 
       // Also notify all doctors to remove the request from their panels
       global._io.emit("routine-request-removed", { requestId });
+      console.log(`📡 Emitted routine-request-removed to all sockets`);
+    } else {
+      console.error("⚠️ global._io is NOT available! Patient will only be notified via polling.");
     }
 
     return NextResponse.json({

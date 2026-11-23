@@ -15,15 +15,32 @@ export default function EscalationButton() {
   useEffect(() => {
     if (!session?.user?.id) return;
 
-    const socketInstance = io();
+    const socketInstance = io({
+      transports: ['polling', 'websocket'],
+      upgrade: true,
+      timeout: 20000,
+      reconnection: true,
+      reconnectionAttempts: Infinity,
+      reconnectionDelay: 1000,
+      reconnectionDelayMax: 5000,
+    });
     setSocket(socketInstance);
 
-    // Register user with both formats for compatibility
-    socketInstance.emit("register-user", { userId: session.user.id });
-    console.log('Registered user for escalation:', session.user.id);
+    // Register user AFTER connection is established
+    socketInstance.on("connect", () => {
+      socketInstance.emit("register-user", { userId: session.user.id });
+      console.log('🔌 Escalation socket connected, registered user:', session.user.id);
+    });
+
+    // Re-register user on reconnect
+    socketInstance.on("reconnect", () => {
+      socketInstance.emit("register-user", { userId: session.user.id });
+      console.log('🔌 Escalation socket reconnected, re-registered user:', session.user.id);
+    });
 
     // Listen for doctor acceptance
     socketInstance.on("doctor-accepted", (data) => {
+      console.log('📨 Doctor accepted escalation:', data);
       setDoctorInfo({ name: data.doctorName });
       setRequestId(data.requestId);
       setShowModal(true);
@@ -47,6 +64,10 @@ export default function EscalationButton() {
       console.log('No doctors available:', data);
       alert(`⚠️ ${data.message}`);
       setIsEscalating(false);
+    });
+
+    socketInstance.on("connect_error", (err) => {
+      console.warn('🔌 Escalation socket error:', err.message);
     });
 
     return () => {
