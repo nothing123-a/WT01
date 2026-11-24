@@ -54,15 +54,37 @@ export default function VideoRoom() {
           });
           console.log('✅ Media access granted');
         } catch (error) {
-          console.error('❌ Media access failed:', error.name, error.message);
-          if (error.name === 'NotAllowedError') {
-            setMediaError('Camera/microphone access denied. Please allow access and refresh.');
-          } else if (error.name === 'NotReadableError') {
-            setMediaError('Camera/microphone is being used by another tab. Please close other video tabs and refresh.');
-          } else {
-            setMediaError('Failed to access camera/microphone. Please check your device.');
+          console.warn('⚠️ Standard video/audio failed:', error.name, error.message);
+          try {
+            // Attempt audio-only if camera is blocked/busy
+            const audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            
+            // Generate placeholder canvas video track so peer connection gets both tracks
+            const canvas = document.createElement('canvas');
+            canvas.width = 640;
+            canvas.height = 480;
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = '#0f172a';
+            ctx.fillRect(0, 0, 640, 480);
+            ctx.fillStyle = '#38bdf8';
+            ctx.font = 'bold 24px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText(session?.user?.isDoctor ? '👨‍⚕️ Doctor (Camera in use)' : '🌱 Patient (Camera in use)', 320, 240);
+            
+            const canvasStream = canvas.captureStream(10);
+            const videoTrack = canvasStream.getVideoTracks()[0];
+            audioStream.addTrack(videoTrack);
+            stream = audioStream;
+            console.log('✅ Fallback placeholder stream created');
+          } catch (fallbackError) {
+            console.error('❌ Fallback stream failed:', fallbackError);
+            if (error.name === 'NotAllowedError') {
+              setMediaError('Camera/microphone access denied. Please allow access and refresh.');
+            } else if (error.name === 'NotReadableError') {
+              setMediaError('Camera is being used by another tab. For full 2-way video, test across two separate devices.');
+            }
+            return;
           }
-          return; // Don't throw, just return to prevent reload loop
         }
 
         if (!mounted) return;
@@ -447,7 +469,11 @@ export default function VideoRoom() {
       <div className="flex-1 p-3 sm:p-6">
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 sm:gap-8 h-full max-w-7xl mx-auto">
           {/* Remote participant */}
-          <div className="relative bg-white rounded-2xl sm:rounded-3xl shadow-2xl overflow-hidden border-2 border-emerald-100 transform hover:scale-[1.02] transition-transform duration-300">
+          <div 
+            onClick={() => remoteVideoRef.current?.play?.()} 
+            className="relative bg-white rounded-2xl sm:rounded-3xl shadow-2xl overflow-hidden border-2 border-emerald-100 transform hover:scale-[1.02] transition-transform duration-300 cursor-pointer"
+            title="Click to play remote video if paused"
+          >
             <video
               ref={remoteVideoRef}
               autoPlay
@@ -460,7 +486,7 @@ export default function VideoRoom() {
                 backgroundColor: '#000'
               }}
               onLoadedMetadata={() => console.log('Remote video metadata loaded')}
-              onCanPlay={() => console.log('Remote video can play')}
+              onCanPlay={() => remoteVideoRef.current?.play?.()}
               onError={(e) => console.error('Remote video error:', e)}
             />
             {!remoteStream && (
